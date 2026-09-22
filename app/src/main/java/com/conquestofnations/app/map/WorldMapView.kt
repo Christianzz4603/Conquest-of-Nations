@@ -19,8 +19,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.conquestofnations.app.game.City
 import com.conquestofnations.app.game.GameState
@@ -28,21 +32,21 @@ import com.conquestofnations.app.game.WorldData
 import kotlin.math.hypot
 
 /**
- * First playable slice of the world map:
- * - cities drawn as circles, colored by owning country
- * - tap a city you own to select it, then tap an adjacent city to
- *   move troops into it (reinforce if friendly, attack if not)
- * - bottom panel shows the last action's result, whose turn it is,
- *   and an End Turn button
+ * The real world map: actual country borders (from assets/world_countries.geojson)
+ * projected with a simple equirectangular projection, with our playable cities
+ * drawn on top at their real lon/lat.
  *
- * This uses placeholder fixed x/y geometry, not real map projections --
- * that comes once the geodata pipeline is in place.
+ * - countries we're playing with are tinted by owning player's color
+ * - other countries are shown as neutral scenery so the map reads as a real world map
+ * - tap a city you own, then an adjacent city, to move/attack
  */
 @Composable
 fun WorldMapScreen() {
+    val context = LocalContext.current
+    val countryBorders = remember { WorldGeoData.load(context) }
+
     val gameState = remember {
         GameState(
-            countries = WorldData.countries,
             initialCities = WorldData.initialCities(),
             players = WorldData.players
         )
@@ -60,6 +64,7 @@ fun WorldMapScreen() {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color(0xFFBFE3F0))
                     .pointerInput(cities) {
                         detectTapGestures { tapOffset ->
                             val tapped = findTappedCity(cities, tapOffset, size.width.toFloat(), size.height.toFloat())
@@ -87,13 +92,26 @@ fun WorldMapScreen() {
                         }
                     }
             ) {
+                val width = size.width
+                val height = size.height
+
+                // Draw every real country's borders. Ones we're playing with are
+                // tinted by their current majority owner; everything else is neutral.
+                countryBorders.forEach { border ->
+                    val fillColor = countryFillColor(border.id, cities)
+                    border.rings.forEach { ring ->
+                        val path = pathForRing(ring, width, height)
+                        drawPath(path, color = fillColor, style = Fill)
+                        drawPath(path, color = Color(0xFF6B6B6B), style = Stroke(width = 1f))
+                    }
+                }
+
                 cities.forEach { city ->
                     drawCity(
                         city = city,
-                        countryColor = gameState.countries[city.countryId]?.color ?: Color.Gray,
                         isSelected = city.id == selectedCityId,
-                        canvasWidth = size.width,
-                        canvasHeight = size.height
+                        canvasWidth = width,
+                        canvasHeight = height
                     )
                 }
             }
@@ -124,7 +142,38 @@ fun WorldMapScreen() {
     }
 }
 
-private const val CITY_RADIUS = 28f
+private val NEUTRAL_COLOR = Color(0xFFD9D2C5)
+private val HUMAN_COLOR = Color(0xFF3B82F6)
+private val AI_COLOR = Color(0xFFDC2626)
+
+private fun playerColor(ownerId: String): Color = when (ownerId) {
+    "human" -> HUMAN_COLOR
+    "ai_red" -> AI_COLOR
+    else -> NEUTRAL_COLOR
+}
+
+/** Countries we're actually playing with are tinted by whoever owns their first city. */
+private fun countryFillColor(countryId: String, cities: List<City>): Color {
+    val cityInCountry = cities.firstOrNull { it.countryId == countryId } ?: return NEUTRAL_COLOR
+    return playerColor(cityInCountry.ownerId)
+}
+
+private fun pathForRing(ring: List<Pair<Double, Double>>, canvasWidth: Float, canvasHeight: Float): Path {
+    val path = Path()
+    ring.forEachIndexed { index, (lon, lat) ->
+        val (x, y) = WorldGeoData.project(lon, lat, canvasWidth, canvasHeight)
+        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    return path
+}
+
+private const val CITY_RADIUS = 16f
+
+private fun cityCenter(city: City, canvasWidth: Float, canvasHeight: Float): Offset {
+    val (x, y) = WorldGeoData.project(city.lon, city.lat, canvasWidth, canvasHeight)
+    return Offset(x, y)
+}
 
 private fun findTappedCity(
     cities: List<City>,
@@ -133,31 +182,30 @@ private fun findTappedCity(
     canvasHeight: Float
 ): City? = cities.firstOrNull { city ->
     val center = cityCenter(city, canvasWidth, canvasHeight)
-    hypot((tapOffset.x - center.x).toDouble(), (tapOffset.y - center.y).toDouble()) <= CITY_RADIUS
+    hypot((tapOffset.x - center.x).toDouble(), (tapOffset.y - center.y).toDouble()) <= CITY_RADIUS + 8f
 }
-
-private fun cityCenter(city: City, canvasWidth: Float, canvasHeight: Float): Offset =
-    Offset(x = city.xFraction * canvasWidth, y = city.yFraction * canvasHeight)
 
 private fun DrawScope.drawCity(
     city: City,
-    countryColor: Color,
     isSelected: Boolean,
     canvasWidth: Float,
     canvasHeight: Float
 ) {
     val center = cityCenter(city, canvasWidth, canvasHeight)
+    val color = playerColor(city.ownerId)
 
     if (isSelected) {
-        drawCircle(color = Color.White, radius = CITY_RADIUS + 6f, center = center)
+        drawCircle(color = Color.White, radius = CITY_RADIUS + 5f, center = center)
     }
 
-    drawCircle(color = countryColor, radius = CITY_RADIUS, center = center)
+    drawCircle(color = Color.Black, radius = CITY_RADIUS + 2f, center = center)
+    drawCircle(color = color, radius = CITY_RADIUS, center = center)
 
+    // One small marker per unit garrisoned here
     repeat(city.garrison) { index ->
         val angle = (index * 47) % 360
         val radians = Math.toRadians(angle.toDouble())
-        val distance = CITY_RADIUS * 0.55f
+        val distance = CITY_RADIUS * 1.6
         val markerCenter = Offset(
             x = center.x + (distance * Math.cos(radians)).toFloat(),
             y = center.y + (distance * Math.sin(radians)).toFloat()

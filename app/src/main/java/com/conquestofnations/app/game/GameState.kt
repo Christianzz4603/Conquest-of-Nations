@@ -5,8 +5,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
+/**
+ * Core game state: cities across a few real countries, one human player and
+ * one AI, turn-based movement and simple deterministic combat (no unit
+ * types or dice yet -- those come with the full military layer later).
+ */
 class GameState(
-    val countries: Map<String, Country>,
     initialCities: Map<String, City>,
     val players: List<Player>
 ) {
@@ -17,6 +21,11 @@ class GameState(
 
     fun cityOwner(cityId: String): String? = cities[cityId]?.ownerId
 
+    /**
+     * Move (or attack) a garrison from one city to an adjacent city.
+     * Leaves 1 unit behind at the source as a garrison.
+     * Returns a short result message for the UI.
+     */
     fun moveOrAttack(fromCityId: String, toCityId: String): String {
         val from = cities[fromCityId] ?: return "Unknown source city"
         val to = cities[toCityId] ?: return "Unknown target city"
@@ -49,6 +58,7 @@ class GameState(
         }
     }
 
+    /** Ends the current player's turn and gives every city +1 garrison. */
     fun endTurn() {
         val currentIndex = players.indexOfFirst { it.id == currentPlayerId }
         val nextIndex = (currentIndex + 1) % players.size

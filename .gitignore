@@ -1,0 +1,15 @@
+# Generated at build time by the downloadWorldGeoJson Gradle task -- see app/build.gradle.kts.
+# Not tracked so the app always builds against the latest upstream world border data.
+app/src/main/assets/world_countries.geojson
+
+# Standard Android/Gradle ignores
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/

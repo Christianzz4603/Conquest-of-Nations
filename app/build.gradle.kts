@@ -39,6 +39,29 @@ android {
     }
 }
 
+/**
+ * Downloads the full real-world country borders (all ~180 countries) from the
+ * public-domain johan/world.geo.json dataset at build time, straight into
+ * assets. This keeps the data complete and exactly as published upstream --
+ * no hand-transcribed subset -- and always in sync with the source.
+ */
+val worldGeoJsonAsset = file("src/main/assets/world_countries.geojson")
+
+tasks.register("downloadWorldGeoJson") {
+    outputs.file(worldGeoJsonAsset)
+    doLast {
+        worldGeoJsonAsset.parentFile.mkdirs()
+        val url = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json"
+        ant.withGroovyBuilder {
+            "get"("src" to url, "dest" to worldGeoJsonAsset, "skipexisting" to false)
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("downloadWorldGeoJson")
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.0")
